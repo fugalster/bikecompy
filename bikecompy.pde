@@ -1,21 +1,4 @@
-// BMP08 with Arduino
-
-// DANGER: The BMP08 accepts 1.8 to 3.6 Volts – so no chance to connect it directly to 5 Volts.
-
-// Connect VCC to VCC and GND to GND, SCL goes to analogue pin 5, SDA to analogue pin4.
-// Notice! Sparkfun breakoutboard contains already 4.7K pull ups,
-// If not using pre-built pull-ups:
-// --> Add some pull up resistors (1K to 20K, most often something like 4.7K) between SDA, SCL and VCC finishes the setup.
-
-// References: http://interactive-matter.org/2009/12/arduino-barometric-pressure-sensor-bmp085/ and http://news.jeelabs.org/2009/02/19/hooking-up-a-bmp085-sensor/
-// Specification: http://www.bosch-sensortec.com/content/language1/downloads/BST-BMP085-DS000-05.pdf
-// SparkFun breakout board: http://www.sparkfun.com/commerce/product_info.php?products_id=9694
-
 #include "Wire.h"
-
-//#include <LiquidCrystal.h>
-//LiquidCrystal lcd(12,11,5,4,3,2);
-
 #include <MeetAndroid.h>
 MeetAndroid phone;
 
@@ -23,8 +6,7 @@ MeetAndroid phone;
 
 const unsigned char oss = 3; //oversamplig for measurement
 const unsigned char pressure_waittime[4] = { 5, 8, 14, 26 };
-
-
+const int EOC_pin = 4;
 
 //just taken from the BMP085 datasheet
 int ac1;
@@ -39,148 +21,128 @@ int mb;
 int mc;
 int md;
 
+//float     diameter = 678.656;
+int       diameter = 679; // millimeters
+const int speed_pin = 2;
+const int cadence_pin = 3;
+const int min_wheel_tick = 1;
+const int min_pedal_tick = 1;
 
-
-
-
-//for calculating altitude
-
-// main loop variables
-int hall_effect_pin = 2;
-bool sense;
-int pulse = 0;
-bool old_poll_sense;
-int poll_count = 0;
-int max_poll_count = 5000;
-float avg_speed = 0.0;
-int min_pulse = 1;
-const int max_phone_send = 4000; // maximum time between sending to phone in milliseconds
-
-// function prototypes and their variables
+// function prototypes
 void bmp085_get_cal_data();
 long bmp085_read_ut();
 long bmp085_read_up();
 void bmp085_read_temperature_and_pressure(int& temperature, long& pressure);
 void write_register(unsigned char r, unsigned char v);
 char read_register(unsigned char r);
-int read_int_register(unsigned char r);
-
-float hall_effect_sense();
-    unsigned long overflow = 0 - 1;
-    unsigned long current_clock;
-    unsigned long last_speed_clock = 0;
-    unsigned long diff;
-    float speed;
-    float alpha = 0.9;
-    float alpha_minus = 1 - alpha;
-
+int  read_int_register(unsigned char r);
+void wheel();
+    volatile unsigned long wheel_time = 0;
+    volatile int           wheel_tick = 0;
+void pedal();
+    volatile unsigned long pedal_time = 0;
+    volatile int           pedal_tick = 0;
 void phone_send_all();
-    int temperature;
-    long pressure;
-    double altitude;
-
-float calculate_speed(float circ_speed);
+float speed();
     float circ;
-
-//void compute_altitude(double* altitude, long pressure) {
-//    float exponent = 1/5.255;
-//    float P_0 = 101325;
-
+float cadence();
 
 void setup() {
 
     Wire.begin();
-    bmp085_get_cal_data();
+
     Serial.begin(115200);
-    float diameter = 678.656;
-    float circ = 3.14159 * diameter;
-    pinMode(hall_effect_pin, INPUT);
-
+    
+    bmp085_get_cal_data();
+    
+    circ = 3.14159 * diameter;
+    
+    attachInterrupt(speed_pin-2, wheel, FALLING);
+    //attachInterrupt(cadence_pin-2, pedal, FALLING);
+    pinMode(EOC_pin, INPUT);
+ 
 }
-
-
 
 void loop() {
 
-    static unsigned long next_phone_send = max_phone_send;
+    static unsigned long force_phone_send = 4000;
+    static unsigned long next_phone_send = 1000;
 
-    sense = digitalRead(hall_effect_pin);
-
-    if ( !sense && old_poll_sense ) {
-        avg_speed += hall_effect_sense();
-        pulse++;
+    if ( wheel_tick >= min_wheel_tick && millis() >= next_phone_send ) {
+        phone_send();
+        next_phone_send = millis() + 1000;
+        force_phone_send = millis() + 4000;
     }
-    
-    if ( poll_count >= max_poll_count && pulse >= min_pulse ) {
-        avg_speed = avg_speed/pulse;
-        phone_send_all();
-        next_phone_send = millis() + max_phone_send;
-        poll_count = 0;
-        pulse = 0;
-        avg_speed = 0;
+    else if ( millis() > force_phone_send ) {
+        phone_send();
+        next_phone_send = millis() + 1000;
+        force_phone_send = millis() + 4000;
     }
-    else if ( millis() > next_phone_send ) {
-        avg_speed = 0;
-        phone_send_all();
-        next_phone_send = millis() + max_phone_send;
-        poll_count = 0;
-        pulse = 0;
-        avg_speed = 0;
-    }
-
-    poll_count++;
-    old_poll_sense = sense;
-
-    delayMicroseconds(200);
 
 }
 
+void phone_send() {
 
-
-void phone_send_all() {
+    static int temperature;
+    static long pressure;
+    static double altitude;
 
     bmp085_read_temperature_and_pressure(&temperature,&pressure);
 
     phone.send("");
     phone.send(temperature*0.1);
     phone.send(pressure*0.001);
-    phone.send(pulse);
-    phone.send(calculate_speed(avg_speed));
+    phone.send(speed());
+    //phone.send(cadence());
 
 }
 
+void wheel() {
 
+    static unsigned long prev_time = 0;
+    unsigned long time = millis();
 
-float hall_effect_sense() {
-
-    current_clock = millis();                // time when fuction is called
-    diff = current_clock - last_speed_clock; // time to complete one rotation of wheel
-
-    // overflow only happens once every 50 days
-    // ignore unless there's a good reason not to
-    //if ( current_clock < last_speed_clock ) {
-    //    diff = current_clock + (overflow - last_speed_clock);
-    //}
-
-    last_speed_clock = current_clock; // reset so it works next time
-
-    speed = 1.0/diff;                 // speed in rotations per milliseconds
-
-    return speed;
-    //return alpha*speed + alpha_minus*avg_speed;
+    wheel_time += time - prev_time; 
+    wheel_tick++;
+    prev_time = time;
 
 }
 
+void pedal() {
 
+    static unsigned long prev_time = 0;
+    unsigned long time = millis();
 
-float calculate_speed(float circ_speed) {
-
-    // return the speed in mph
-    return circ_speed * circ * 2.2369 * 1000;
+    pedal_time += time - prev_time; 
+    pedal_tick++;
+    prev_time = time;
 
 }
 
+float speed() {
+ 
+    // return the speed in m/s
+    float meters_per_second = circ*wheel_tick/wheel_time;
+    wheel_tick = 0;
+    wheel_time = 0;
 
+    return meters_per_second;
+    
+    // mph
+    //return meters_per_second * 2.2369;
+
+}
+
+float cadence() {
+
+    // return the cadence in rev/min
+    float rpm = pedal_tick*1000*60/pedal_time;
+    pedal_tick = 0;
+    pedal_time = 0;
+
+    return rpm;
+    
+}
 
 void bmp085_get_cal_data() {
 
@@ -198,22 +160,18 @@ void bmp085_get_cal_data() {
 
 }
 
-
-
 long bmp085_read_ut() {
 
     write_register(0xF4,0x2E);
-    delay(5); //longer than 4.5 ms
+    while ( !digitalRead(EOC_pin) ) {}
     return read_int_register(0xF6);
 
 }
 
-
-
 long bmp085_read_up() {
 
     write_register(0xF4, 0x34+(oss<<6));
-    delay(pressure_waittime[oss]);
+    while ( !digitalRead(EOC_pin) ) {}
 
     unsigned char msb, lsb, xlsb;
     Wire.beginTransmission(I2C_ADDRESS);
@@ -233,8 +191,6 @@ long bmp085_read_up() {
     return (((long)msb<<16) | ((long)lsb<<8) | ((long)xlsb)) >>(8-oss);
 
 }
-
-
 
 void bmp085_read_temperature_and_pressure(int* temperature, long* pressure) {
 
@@ -276,14 +232,6 @@ void bmp085_read_temperature_and_pressure(int* temperature, long* pressure) {
 
 }
 
-
-// leave this up to the phone
-//void compute_altitude(double* altitude, long pressure) {
-//
-//    *altitude = 44330*(1-pow(float(pressure)/P_0, exponent));
-//
-//}
-
 void write_register(unsigned char r, unsigned char v) {
 
     Wire.beginTransmission(I2C_ADDRESS);
@@ -292,8 +240,6 @@ void write_register(unsigned char r, unsigned char v) {
     Wire.endTransmission();
 
 }
-
-
 
 char read_register(unsigned char r) {
     
@@ -310,8 +256,6 @@ char read_register(unsigned char r) {
     return v;
 
 }
-
-
 
 int read_int_register(unsigned char r) {
     
