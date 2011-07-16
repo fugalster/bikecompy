@@ -128,7 +128,7 @@ void pedal() {
 float speed() {
  
     // return the speed in m/s
-    float meters_per_second = circ*wheel_tick/wheel_time;
+    float meters_per_second = circ*wheel_tick/wheel_time; // mm/ms == m/s
     wheel_tick = 0;
     wheel_time = 0;
 
