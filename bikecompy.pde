@@ -4,6 +4,12 @@ MeetAndroid phone;
 
 #define I2C_ADDRESS 0x77
 
+// Configuration //
+const int min_wheel_tick = 1;
+const int min_pedal_tick = 1;
+#define DATA_SEND_INTERVAL 1000
+#define FORCE_SEND_INTERVAL 4000
+
 const unsigned char oss = 3; //oversamplig for measurement
 const unsigned char pressure_waittime[4] = { 5, 8, 14, 26 };
 const int EOC_pin = 4;
@@ -25,8 +31,6 @@ int md;
 int       diameter = 679; // millimeters
 const int speed_pin = 2;
 const int cadence_pin = 3;
-const int min_wheel_tick = 1;
-const int min_pedal_tick = 1;
 
 // function prototypes
 void bmp085_get_cal_data();
@@ -65,18 +69,20 @@ void setup() {
 
 void loop() {
 
-    static unsigned long force_phone_send = 4000;
-    static unsigned long next_phone_send = 1000;
+    static unsigned long force_phone_send = FORCE_SEND_INTERVAL;
+    static unsigned long next_phone_send = DATA_SEND_INTERVAL;
 
-    if ( wheel_tick >= min_wheel_tick && millis() >= next_phone_send ) {
+    unsigned long current_millis = millis();
+
+    if ( wheel_tick >= min_wheel_tick && current_millis >= next_phone_send ) {
         phone_send();
-        next_phone_send = millis() + 1000;
-        force_phone_send = millis() + 4000;
+        next_phone_send = current_millis + DATA_SEND_INTERVAL;
+        force_phone_send = current_millis + FORCE_SEND_INTERVAL;
     }
-    else if ( millis() > force_phone_send ) {
+    else if ( current_millis > force_phone_send ) {
         phone_send();
-        next_phone_send = millis() + 1000;
-        force_phone_send = millis() + 4000;
+        next_phone_send = current_millis + DATA_SEND_INTERVAL;
+        force_phone_send = current_millis + FORCE_SEND_INTERVAL;
     }
 
 }
