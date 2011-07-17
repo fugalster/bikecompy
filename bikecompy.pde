@@ -2,19 +2,19 @@
 #include <MeetAndroid.h>
 MeetAndroid phone;
 
-#define I2C_ADDRESS 0x77
 
 // Configuration //
-const int min_wheel_tick = 1;
-const int min_pedal_tick = 1;
+const int min_wheel_tick = 1; // minimum wheel ticks between sending to phone
+const int min_pedal_tick = 1; // minimum pedal ticks between sending to phone
 #define DATA_SEND_INTERVAL 1000
 #define FORCE_SEND_INTERVAL 4000
 
 const unsigned char oss = 3; //oversamplig for measurement
-const unsigned char pressure_waittime[4] = { 5, 8, 14, 26 };
 const int EOC_pin = 4;
 
-//just taken from the BMP085 datasheet
+/* be careful that bmp085 is wired to no more than 3.3V!! */
+#define BMP085_ADDRESS 0x77 // i2c address of pressure sensor
+//just taken from the bmp085 datasheet
 int ac1;
 int ac2;
 int ac3;
@@ -27,10 +27,10 @@ int mb;
 int mc;
 int md;
 
-//float     diameter = 678.656;
-int       diameter = 679; // millimeters
-const int speed_pin = 2;
-const int cadence_pin = 3;
+int       diameter = 679;     // my road bike, millimeters. will need to be in
+                              // EEPROM and programable from the phone
+const int speed_pin = 2;      // interrupt 0
+const int cadence_pin = 3;    // interrupt 1
 
 // function prototypes
 void bmp085_get_cal_data();
@@ -53,17 +53,13 @@ float cadence();
 
 void setup() {
 
-    Wire.begin();
-
-    Serial.begin(115200);
-    
-    bmp085_get_cal_data();
-    
+    Wire.begin(); // i2c communication
+    Serial.begin(115200); // bluetooth communication
+    pinMode(EOC_pin, INPUT); // bmp085 end-of-conversion signal
+    bmp085_get_cal_data(); // calibrate bmp085
     circ = 3.14159 * diameter;
-    
-    attachInterrupt(speed_pin-2, wheel, FALLING);
-    //attachInterrupt(cadence_pin-2, pedal, FALLING);
-    pinMode(EOC_pin, INPUT);
+    attachInterrupt(speed_pin-2, wheel, FALLING); // speed HES
+    //attachInterrupt(cadence_pin-2, pedal, FALLING); // cadence HES
  
 }
 
@@ -74,7 +70,7 @@ void loop() {
 
     unsigned long current_millis = millis();
 
-    if ( current_millis >= next_phone_send ) {
+    if ( current_millis >= next_phone_end ) {
         if ( wheel_tick >= min_wheel_tick ) {
             phone_send();
             force_phone_send = current_millis + FORCE_SEND_INTERVAL;
@@ -182,11 +178,11 @@ long bmp085_read_up() {
     while ( !digitalRead(EOC_pin) ) {}
 
     unsigned char msb, lsb, xlsb;
-    Wire.beginTransmission(I2C_ADDRESS);
+    Wire.beginTransmission(BMP085_ADDRESS);
     Wire.send(0xF6); // register to read
     Wire.endTransmission();
 
-    Wire.requestFrom(I2C_ADDRESS, 3); // read a byte
+    Wire.requestFrom(BMP085_ADDRESS, 3); // read a byte
     while(!Wire.available()) { }
 
     msb = Wire.receive();
@@ -242,7 +238,7 @@ void bmp085_read_temperature_and_pressure(int* temperature, long* pressure) {
 
 void write_register(unsigned char r, unsigned char v) {
 
-    Wire.beginTransmission(I2C_ADDRESS);
+    Wire.beginTransmission(BMP085_ADDRESS);
     Wire.send(r);
     Wire.send(v);
     Wire.endTransmission();
@@ -253,11 +249,11 @@ char read_register(unsigned char r) {
     
     unsigned char v;
 
-    Wire.beginTransmission(I2C_ADDRESS);
+    Wire.beginTransmission(BMP085_ADDRESS);
     Wire.send(r); // register to read
     Wire.endTransmission();
 
-    Wire.requestFrom(I2C_ADDRESS, 1); // read a byte
+    Wire.requestFrom(BMP085_ADDRESS, 1); // read a byte
     while(!Wire.available()) { }
     v = Wire.receive();
 
@@ -268,11 +264,11 @@ char read_register(unsigned char r) {
 int read_int_register(unsigned char r) {
     
     unsigned char msb, lsb;
-    Wire.beginTransmission(I2C_ADDRESS);
+    Wire.beginTransmission(BMP085_ADDRESS);
     Wire.send(r); // register to read
     Wire.endTransmission();
 
-    Wire.requestFrom(I2C_ADDRESS, 2); // read a byte
+    Wire.requestFrom(BMP085_ADDRESS, 2); // read a byte
     while(!Wire.available()) { }
     msb = Wire.receive();
 
