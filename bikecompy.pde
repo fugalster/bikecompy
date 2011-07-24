@@ -70,7 +70,7 @@ void loop() {
 
     unsigned long current_millis = millis();
 
-    if ( current_millis >= next_phone_end ) {
+    if ( current_millis >= next_phone_send ) {
         if ( wheel_tick >= min_wheel_tick ) {
             phone_send();
             force_phone_send = current_millis + FORCE_SEND_INTERVAL;
