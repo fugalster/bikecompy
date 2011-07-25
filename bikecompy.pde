@@ -46,6 +46,7 @@ void wheel();
 void pedal();
     volatile unsigned long pedal_time = 0;
     volatile int           pedal_tick = 0;
+void phone_send();
 void phone_send_all();
 float speed();
     float circ;
