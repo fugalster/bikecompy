@@ -36,7 +36,7 @@ const int cadence_pin = 3;    // interrupt 1
 void bmp085_get_cal_data();
 long bmp085_read_ut();
 long bmp085_read_up();
-void bmp085_read_temperature_and_pressure(int& temperature, long& pressure);
+void bmp085_read_temperature_and_pressure(int* temperature, long* pressure);
 void write_register(unsigned char r, unsigned char v);
 char read_register(unsigned char r);
 int  read_int_register(unsigned char r);
